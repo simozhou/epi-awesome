@@ -251,10 +251,52 @@ process multiqc {
     """
 }
 
+/*
+ * STEP 3 (4) - BowTie2
+ */
+process bowtie2 {
+    tag "alignment"
+    publishDir "${param.outdir}/alignment", mode: 'copy'
+
+    input:
+    file fastqfile from read_files_trimming
+
+    output:
+    file "*.bam" into bowtie_output
+
+    script:
+    """
+    bowtie2 align ${fastqfile} ${genome.index}
+    """
+}
+
+/*
+ * STEP 4 (5) - MACS2
+ */
+process macs2 {
+    tag "peak calling"
+    publishDir "${param.outdir}/macs2", mode: 'copy'
+}
+
+/*
+ * STEP I - Build reference index
+ */
+process buildIndex {
+    input:
+    file genome from genome
+
+    output:
+    file 'genome.index*' into genome_index
+
+    """
+    bowtie2-build ${genome} genome.index
+    """
+}
+
 
 
 /*
- * STEP 3 - Output Description HTML
+ * STEP N - Output Description HTML
  */
 process output_documentation {
     publishDir "${params.outdir}/Documentation", mode: 'copy'
