@@ -5,7 +5,7 @@
 ========================================================================================
  nf-core/epiawesome Analysis Pipeline.
  #### Homepage / Documentation
- https://github.com/simozhou/epi-awesome.git
+ https://github.com/nf-core/epiawesome
 ----------------------------------------------------------------------------------------
 */
 
@@ -31,12 +31,15 @@ def helpMessage() {
 
     Mandatory arguments:
       --reads                       Path to input data (must be surrounded with quotes)
-      --genome                      Path to Fasta reference
+      --genome                      Name of iGenomes reference
       -profile                      Configuration profile to use. Can use multiple (comma separated)
                                     Available: conda, docker, singularity, awsbatch, test and more.
 
     Options:
       --singleEnd                   Specifies that the input is single end reads
+
+    References                      If not specified in the configuration file or you wish to overwrite any of the references.
+      --fasta                       Path to Fasta reference
 
     Other options:
       --outdir                      The output directory where the results will be saved
@@ -60,9 +63,11 @@ if (params.help){
 }
 
 // TODO nf-core: Add any reference files that are needed
-if ( params.genome ){
-    genome_file = file(params.genome)
-    if( !genome_file.exists() ) exit 1, "Fasta file not found: ${params.genome}"
+// Configurable reference genomes
+fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : false
+if ( params.fasta ){
+    fasta = file(params.fasta)
+    if( !fasta.exists() ) exit 1, "Fasta file not found: ${params.fasta}"
 }
 //
 // NOTE - THIS IS NOT USED IN THIS PIPELINE, EXAMPLE ONLY
@@ -134,7 +139,7 @@ summary['Pipeline Version'] = workflow.manifest.version
 summary['Run Name']     = custom_runName ?: workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Reads']        = params.reads
-summary['Fasta Ref']    = params.genome
+summary['Fasta Ref']    = params.fasta
 summary['Data Type']    = params.singleEnd ? 'Single-End' : 'Paired-End'
 summary['Max Memory']   = params.max_memory
 summary['Max CPUs']     = params.max_cpus
@@ -165,7 +170,7 @@ def create_workflow_summary(summary) {
     id: 'nf-core-epiawesome-summary'
     description: " - this information is collected when the pipeline is started."
     section_name: 'nf-core/epiawesome Workflow Summary'
-    section_href: 'https://github.com/simozhou/epi-awesome.git'
+    section_href: 'https://github.com/nf-core/epiawesome'
     plot_type: 'html'
     data: |
         <dl class=\"dl-horizontal\">
@@ -246,51 +251,10 @@ process multiqc {
     """
 }
 
-/*
- * STEP 3 (4) - BowTie2
- */
-process bowtie2 {
-    tag "alignment"
-    publishDir "${param.outdir}/alignment", mode: 'copy'
-
-    input:
-    file fastqfile from read_files_trimming
-
-    output:
-    file "*.bam" into bowtie_output
-
-    script:
-    """
-    bowtie2 align ${fastqfile} ${genome.index}
-    """
-}
-
-/*
- * STEP 4 (5) - MACS2
- */
-process macs2 {
-    tag "peak calling"
-    publishDir "${param.outdir}/macs2", mode: 'copy'
-}
-
-/*
- * STEP I - Build reference index
- */
-process buildIndex {
-    input:
-    file genome from genome
-
-    output:
-    file 'genome.index*' into genome_index
-
-    """
-    bowtie2-build ${genome} genome.index
-    """
-}
 
 
 /*
- * STEP N - Output Description HTML
+ * STEP 3 - Output Description HTML
  */
 process output_documentation {
     publishDir "${params.outdir}/Documentation", mode: 'copy'
