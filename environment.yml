@@ -7,3 +7,5 @@ dependencies:
   # TODO nf-core: Add required software dependencies here
   - fastqc=0.11.8
   - multiqc=1.6
+#  - bowtie2
+#  - macs2
