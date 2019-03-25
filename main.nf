@@ -32,11 +32,13 @@ def helpMessage() {
     Mandatory arguments:
       --reads                       Path to input data (must be surrounded with quotes)
       --genome                      Name of iGenomes reference
+      --macsConfig                  Configuration file for peaking calling using MACS. Format: ChIPSampleID,CtrlSampleID,AnalysisID
       -profile                      Configuration profile to use. Can use multiple (comma separated)
                                     Available: conda, docker, singularity, awsbatch, test and more.
 
     Options:
       --singleEnd                   Specifies that the input is single end reads
+      --broad                       For broad peaks detection in MACS2
 
     References                      If not specified in the configuration file or you wish to overwrite any of the references.
       --fasta                       Path to Fasta reference
@@ -123,6 +125,21 @@ ch_output_docs = Channel.fromPath("$baseDir/docs/output.md")
  }
 
 
+/*
+ * Create channel for MACS2 config file
+ */
+
+Channel
+    .from(macsconfig.readLines())
+    .map { line ->
+        list = line.split(',')
+        chip_sample_id = list[0]
+        ctrl_sample_id = list[1]
+        analysis_id = list[2]
+        [ chip_sample_id, ctrl_sample_id, analysis_id ]
+    }
+.into{ macs_para }
+
 // Header log info
 log.info """=======================================================
                                           ,--./,-.
@@ -197,11 +214,26 @@ process get_software_versions {
     echo $workflow.nextflow.version > v_nextflow.txt
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
+    bowtie2 --version > v_bowtie2.txt
+    macs2 --version > v_macs2.txt
     scrape_software_versions.py > software_versions_mqc.yaml
     """
 }
 
+/*
+ * PREPROCESSING I - Build reference index
+ */
+process buildIndex {
+    input:
+    file fasta from fasta
 
+    output:
+    file 'genome.index' into genome_index
+
+    """
+    bowtie2-build ${fasta} genome.index
+    """
+}
 
 /*
  * STEP 1 - FastQC
@@ -251,45 +283,74 @@ process multiqc {
     """
 }
 
+
+
 /*
- * STEP 3 (4) - BowTie2
+ * BowTie2
  */
 process bowtie2 {
     tag "alignment"
-    publishDir "${param.outdir}/alignment", mode: 'copy'
+    publishDir "${param.outdir}/alignment", mode: 'copy', pattern: '*.bam'
 
     input:
-    file fastqfile from read_files_trimming
+    file reads from read_files_trimming
+    file index from genome_index
 
     output:
-    file "*.bam" into bowtie_output
+    '*.bam'  into bowtie_output
 
     script:
+    prefix=reads[0].toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
     """
-    bowtie2 align ${fastqfile} ${genome.index}
+    bowtie2 align -x ${genome.index} -U $reads | samtools view -bo ${prefix}.bam
     """
 }
 
 /*
- * STEP 4 (5) - MACS2
+ * SAMTOOLS SORTING
+ */
+process samtools {
+    publishDir "${param.outdir}/alignment", mode: 'copy', pattern: '*.sorted.bam'
+
+    input:
+    file unsorted from bowtie_output
+
+    output:
+    file "*.sorted.bam" into sorted_bams
+
+    script:
+    prefix=unsorted[0].toString() - ~/(.bam)?$/
+    """
+    samtools sort -o ${prefix}.sorted.bam -@ ${params.max_cpus} $unsorted
+    """
+}
+
+
+/*
+ * MACS2
  */
 process macs2 {
     tag "peak calling"
     publishDir "${param.outdir}/macs2", mode: 'copy'
-}
 
-/*
- * STEP I - Build reference index
- */
-process buildIndex {
     input:
-    file genome from genome
+    file sorted_bams from sorted_bams.collect()
+    set chip_sample, ctrl_sample, analysis_name from macs_para
 
     output:
-    file 'genome.index*' into genome_index
+    file "*.{bed,r,narrowPeak,xls}" into macs_results
 
+    script:
+    ctrl=ctrl_sample == ''? '': "-c ${ctrl_sample}.sorted.bam"
+    broad=params.broad ? "--broad" : ""
     """
-    bowtie2-build ${genome} genome.index
+    macs2 callpeak \\
+     -t $sorted_bams \\
+     $ctrl \\
+     $broad \\
+     -g hs \\
+     -f BAM \\
+     -n $analysis_name
     """
 }
 
@@ -312,7 +373,6 @@ process output_documentation {
     markdown_to_html.r $output_docs results_description.html
     """
 }
-
 
 
 /*
