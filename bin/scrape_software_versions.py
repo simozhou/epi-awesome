@@ -9,12 +9,16 @@ regexes = {
     'Nextflow': ['v_nextflow.txt', r"(\S+)"],
     'FastQC': ['v_fastqc.txt', r"FastQC v(\S+)"],
     'MultiQC': ['v_multiqc.txt', r"multiqc, version (\S+)"],
+    'Bowtie2': ['v_bowtie2.txt', r"version (\S+)$"],
+    'Macs2': ['v_macs2', r"macs2 (\S+)"]
 }
 results = OrderedDict()
 results['nf-core/epiawesome'] = '<span style="color:#999999;\">N/A</span>'
 results['Nextflow'] = '<span style="color:#999999;\">N/A</span>'
 results['FastQC'] = '<span style="color:#999999;\">N/A</span>'
 results['MultiQC'] = '<span style="color:#999999;\">N/A</span>'
+results['Bowtie2'] = '<span style="color:#999999;\">N/A</span>'
+results['Macs2'] = '<span style="color:#999999;\">N/A</span>'
 
 # Search each file using its regex
 for k, v in regexes.items():
@@ -36,4 +40,4 @@ data: |
 ''')
 for k,v in results.items():
     print("        <dt>{}</dt><dd>{}</dd>".format(k,v))
-print ("    </dl>")
+print("    </dl>")
