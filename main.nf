@@ -27,11 +27,11 @@ def helpMessage() {
 
     The typical command for running the pipeline is as follows:
 
-    nextflow run nf-core/epiawesome --reads '*_R{1,2}.fastq.gz' -profile docker
+    nextflow run simozhou/epi-awesome --readsPath '*_R{1,2}.fastq.gz' --fasta '*.fasta' --macsConfig macs.config -profile docker
 
     Mandatory arguments:
-      --reads                       Path to input data (must be surrounded with quotes)
-      --genome                      Name of iGenomes reference
+      --readsPath                   Path to input data (must be surrounded with quotes)
+      --genome                      Name of iGenomes reference or bowtie2 index
       --macsConfig                  Configuration file for peaking calling using MACS. Format: ChIPSampleID,CtrlSampleID,AnalysisID
       -profile                      Configuration profile to use. Can use multiple (comma separated)
                                     Available: conda, docker, singularity, awsbatch, test and more.
@@ -103,18 +103,18 @@ ch_output_docs = Channel.fromPath("$baseDir/docs/output.md")
 /*
  * Create a channel for input read files
  */
- if(params.readPaths){
+ if(params.readsPath){
      if(params.singleEnd){
          Channel
-             .from(params.readPaths)
+             .from(params.readsPath)
              .map { row -> [ row[0], [file(row[1][0])]] }
-             .ifEmpty { exit 1, "params.readPaths was empty - no input files supplied" }
+             .ifEmpty { exit 1, "params.readsPath was empty - no input files supplied" }
              .into { read_files_fastqc; read_files_trimming }
      } else {
          Channel
              .from(params.readPaths)
              .map { row -> [ row[0], [file(row[1][0]), file(row[1][1])]] }
-             .ifEmpty { exit 1, "params.readPaths was empty - no input files supplied" }
+             .ifEmpty { exit 1, "params.readsPath was empty - no input files supplied" }
              .into { read_files_fastqc; read_files_trimming }
      }
  } else {
@@ -129,6 +129,8 @@ ch_output_docs = Channel.fromPath("$baseDir/docs/output.md")
  * Create channel for MACS2 config file
  */
 
+macsconfig=file(params.macsConfig)
+
 Channel
     .from(macsconfig.readLines())
     .map { line ->
@@ -138,7 +140,7 @@ Channel
         analysis_id = list[2]
         [ chip_sample_id, ctrl_sample_id, analysis_id ]
     }
-.into{ macs_para }
+.set{ macs_para }
 
 // Header log info
 log.info """=======================================================
@@ -155,7 +157,7 @@ summary['Pipeline Name']  = 'nf-core/epiawesome'
 summary['Pipeline Version'] = workflow.manifest.version
 summary['Run Name']     = custom_runName ?: workflow.runName
 // TODO nf-core: Report custom parameters here
-summary['Reads']        = params.reads
+summary['Reads path']   = params.readsPath
 summary['Fasta Ref']    = params.fasta
 summary['Data Type']    = params.singleEnd ? 'Single-End' : 'Paired-End'
 summary['Max Memory']   = params.max_memory
@@ -297,7 +299,7 @@ process bowtie2 {
     file index from genome_index
 
     output:
-    '*.bam'  into bowtie_output
+    file '*.bam' into bowtie_output
 
     script:
     prefix=reads[0].toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
