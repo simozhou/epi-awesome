@@ -27,7 +27,7 @@ def helpMessage() {
 
     The typical command for running the pipeline is as follows:
 
-    nextflow run simozhou/epi-awesome --readsPath '*_R{1,2}.fastq.gz' --fasta '*.fasta' --macsConfig macs.config -profile docker
+    nextflow run simozhou/epi-awesome --readsPath 'path/to/fastqs/*_R{1,2}.fastq(.gz)" --fasta '*.fasta' --macsConfig macs.config -profile docker
 
     Mandatory arguments:
       --readsPath                   Path to input data (must be surrounded with quotes)
@@ -103,26 +103,10 @@ ch_output_docs = Channel.fromPath("$baseDir/docs/output.md")
 /*
  * Create a channel for input read files
  */
- if(params.readsPath){
-     if(params.singleEnd){
-         Channel
-             .from(params.readsPath)
-             .map { row -> [ row[0], [file(row[1][0])]] }
-             .ifEmpty { exit 1, "params.readsPath was empty - no input files supplied" }
-             .into { read_files_fastqc; read_files_trimming }
-     } else {
-         Channel
-             .from(params.readPaths)
-             .map { row -> [ row[0], [file(row[1][0]), file(row[1][1])]] }
-             .ifEmpty { exit 1, "params.readsPath was empty - no input files supplied" }
-             .into { read_files_fastqc; read_files_trimming }
-     }
- } else {
-     Channel
-         .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
-         .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --singleEnd on the command line." }
-         .into { read_files_fastqc; read_files_trimming }
- }
+Channel
+   .fromFilePairs( params.readsPath, size: params.singleEnd ? 1 : 2 )
+   .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --singleEnd on the command line." }
+   .into { read_files_fastqc; read_files_trimming }
 
 
 /*
@@ -158,6 +142,7 @@ summary['Pipeline Version'] = workflow.manifest.version
 summary['Run Name']     = custom_runName ?: workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Reads path']   = params.readsPath
+summary['Reads']        = params.reads
 summary['Fasta Ref']    = params.fasta
 summary['Data Type']    = params.singleEnd ? 'Single-End' : 'Paired-End'
 summary['Max Memory']   = params.max_memory
@@ -217,6 +202,7 @@ process get_software_versions {
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
     bowtie2 --version > v_bowtie2.txt
+    samtools --version > v_samtools.txt
     macs2 --version > v_macs2.txt
     scrape_software_versions.py > software_versions_mqc.yaml
     """
@@ -230,10 +216,10 @@ process buildIndex {
     file fasta from fasta
 
     output:
-    file 'genome.index' into genome_index
+    file 'genome.index*' into genome_index
 
     """
-    bowtie2-build ${fasta} genome.index
+    bowtie2-build -f ${fasta} genome.index --threads ${params.max_cpus}
     """
 }
 
@@ -253,7 +239,7 @@ process fastqc {
 
     script:
     """
-    fastqc -q $reads
+    fastqc -q $reads -t ${params.max_cpus}
     """
 }
 
@@ -270,6 +256,7 @@ process multiqc {
     // TODO nf-core: Add in log files from your new processes for MultiQC to find!
     file ('fastqc/*') from fastqc_results.collect().ifEmpty([])
     file ('software_versions/*') from software_versions_yaml
+    // file ('alignment/*') from bowtie_output.collect()
     file workflow_summary from create_workflow_summary(summary)
 
     output:
@@ -291,12 +278,13 @@ process multiqc {
  * BowTie2
  */
 process bowtie2 {
-    tag "alignment"
-    publishDir "${param.outdir}/alignment", mode: 'copy', pattern: '*.bam'
+    tag "$name"
+    publishDir "${params.outdir}/alignment", mode: 'copy'
 
     input:
-    file reads from read_files_trimming
-    file index from genome_index
+    file fasta from fasta
+    set val(name), file(reads) from read_files_trimming
+    file index from genome_index.collect()
 
     output:
     file '*.bam' into bowtie_output
@@ -304,7 +292,9 @@ process bowtie2 {
     script:
     prefix=reads[0].toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
     """
-    bowtie2 align -x ${genome.index} -U $reads | samtools view -bo ${prefix}.bam
+    bowtie2 -x genome.index -U $reads -p ${params.max_cpus} -S ${prefix}.sam
+    samtools view -bT ${fasta} -@ ${params.max_cpus} -o ${prefix}.bam ${prefix}.sam
+    rm ${prefix}.sam
     """
 }
 
@@ -312,7 +302,7 @@ process bowtie2 {
  * SAMTOOLS SORTING
  */
 process samtools {
-    publishDir "${param.outdir}/alignment", mode: 'copy', pattern: '*.sorted.bam'
+    publishDir "${params.outdir}/alignment", mode: 'copy'
 
     input:
     file unsorted from bowtie_output
@@ -323,7 +313,7 @@ process samtools {
     script:
     prefix=unsorted[0].toString() - ~/(.bam)?$/
     """
-    samtools sort -o ${prefix}.sorted.bam -@ ${params.max_cpus} $unsorted
+    samtools sort -@ ${params.max_cpus} -o ${prefix}.sorted.bam $unsorted
     """
 }
 
@@ -333,7 +323,7 @@ process samtools {
  */
 process macs2 {
     tag "peak calling"
-    publishDir "${param.outdir}/macs2", mode: 'copy'
+    publishDir "${params.outdir}/macs2", mode: 'copy'
 
     input:
     file sorted_bams from sorted_bams.collect()
@@ -343,11 +333,12 @@ process macs2 {
     file "*.{bed,r,narrowPeak,xls}" into macs_results
 
     script:
+    treat="${chip_sample}.sorted.bam"
     ctrl=ctrl_sample == ''? '': "-c ${ctrl_sample}.sorted.bam"
     broad=params.broad ? "--broad" : ""
     """
     macs2 callpeak \\
-     -t $sorted_bams \\
+     -t $treat \\
      $ctrl \\
      $broad \\
      -g hs \\

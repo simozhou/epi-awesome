@@ -9,3 +9,4 @@ dependencies:
   - multiqc=1.6
   - bioconda::bowtie2=2.3.4.3
   - macs2=2.1.2
+  - samtools=1.7
