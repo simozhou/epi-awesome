@@ -24,7 +24,7 @@ install:
   #  - pip install --upgrade pip
   #  - pip install nf-core
   # Reset
-  - sudo apt install 
+  - sudo apt install tree
   - mkdir ${TRAVIS_BUILD_DIR}/tests && cd ${TRAVIS_BUILD_DIR}/tests
 
 env:
