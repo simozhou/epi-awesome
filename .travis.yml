@@ -24,6 +24,7 @@ install:
   #  - pip install --upgrade pip
   #  - pip install nf-core
   # Reset
+  - sudo apt install 
   - mkdir ${TRAVIS_BUILD_DIR}/tests && cd ${TRAVIS_BUILD_DIR}/tests
 
 env:
@@ -34,6 +35,7 @@ script:
   # Lint the pipeline code
   # - nf-core lint ${TRAVIS_BUILD_DIR}
   # Run the pipeline with the test profile
-  - ll
-  - ll ..
+  - echo $PWD
+  - ls -lh
+  - tree
   - nextflow run ${TRAVIS_BUILD_DIR} -profile test,docker
