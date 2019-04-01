@@ -35,6 +35,6 @@ script:
   # - nf-core lint ${TRAVIS_BUILD_DIR}
   # Run the pipeline with the test profile
   - echo $PWD
-  - ls -lh ../
+  - ls -lh ${TRAVIS_BUILD_DIR}/test_data/*
   - tree
   - nextflow run ${TRAVIS_BUILD_DIR} -profile test,docker
